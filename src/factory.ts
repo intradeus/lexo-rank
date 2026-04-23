@@ -229,11 +229,9 @@ export function createLexoRank(
       rankAfter: (prev) => LexoBucketDecimalRank.rankAfter(prev, config),
       rankBefore: (next) => LexoBucketDecimalRank.rankBefore(next, config),
       rankBetween: (a, b) => LexoBucketDecimalRank.rankBetween(a, b, config),
-      move: (list, from, to) =>
-        LexoBucketDecimalRank.move(list, from, to, config),
+      move: (list, from, to) => LexoBucketDecimalRank.move(list, from, to, config),
       isValid: (raw) => LexoBucketDecimalRank.isValid(raw, config),
-      analyze: (ranks, opts) =>
-        LexoBucketDecimalRank.analyze(ranks, mergeAnalyze(opts)),
+      analyze: (ranks, opts) => LexoBucketDecimalRank.analyze(ranks, mergeAnalyze(opts)),
       safeParse: (raw) => LexoBucketDecimalRank.safeParse(raw, config),
       safeRankAfter: (prev) => LexoBucketDecimalRank.safeRankAfter(prev, config),
       safeRankBefore: (next) => LexoBucketDecimalRank.safeRankBefore(next, config),
@@ -277,8 +275,7 @@ export function createLexoRank(
       safeRankAfter: (prev) => LexoBucketRank.safeRankAfter(prev, config),
       safeRankBefore: (next) => LexoBucketRank.safeRankBefore(next, config),
       safeRankBetween: (a, b) => LexoBucketRank.safeRankBetween(a, b, config),
-      safeMove: (list, from, to) =>
-        LexoBucketRank.safeMove(list, from, to, config),
+      safeMove: (list, from, to) => LexoBucketRank.safeMove(list, from, to, config),
       planRebalance: (currentBucket) =>
         LexoBucketRank.planRebalance(currentBucket, config)
     };
@@ -313,8 +310,7 @@ export function createLexoRank(
       safeRankAfter: (prev) => LexoDecimalRank.safeRankAfter(prev, config),
       safeRankBefore: (next) => LexoDecimalRank.safeRankBefore(next, config),
       safeRankBetween: (a, b) => LexoDecimalRank.safeRankBetween(a, b, config),
-      safeMove: (list, from, to) =>
-        LexoDecimalRank.safeMove(list, from, to, config)
+      safeMove: (list, from, to) => LexoDecimalRank.safeMove(list, from, to, config)
     };
     return mod;
   }
@@ -342,17 +338,14 @@ export function createLexoRank(
     rankAfter: (prev) => LexoRank.rankAfter(prev, alphabet, lrMonitor),
     rankBefore: (next) => LexoRank.rankBefore(next, alphabet, lrMonitor),
     rankBetween: (a, b) => LexoRank.rankBetween(a, b, alphabet, lrMonitor),
-    move: (list, from, to) =>
-      LexoRank.move(list, from, to, alphabet, lrMonitor),
+    move: (list, from, to) => LexoRank.move(list, from, to, alphabet, lrMonitor),
     isValid: (raw) => LexoRank.isValid(raw, alphabet),
     analyze: (ranks, opts) => LexoRank.analyze(ranks, mergeAnalyze(opts)),
     safeParse: (raw) => LexoRank.safeParse(raw, alphabet, lrMonitor),
     safeRankAfter: (prev) => LexoRank.safeRankAfter(prev, alphabet, lrMonitor),
     safeRankBefore: (next) => LexoRank.safeRankBefore(next, alphabet, lrMonitor),
-    safeRankBetween: (a, b) =>
-      LexoRank.safeRankBetween(a, b, alphabet, lrMonitor),
-    safeMove: (list, from, to) =>
-      LexoRank.safeMove(list, from, to, alphabet, lrMonitor)
+    safeRankBetween: (a, b) => LexoRank.safeRankBetween(a, b, alphabet, lrMonitor),
+    safeMove: (list, from, to) => LexoRank.safeMove(list, from, to, alphabet, lrMonitor)
   };
   return mod;
 }

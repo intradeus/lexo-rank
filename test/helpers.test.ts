@@ -258,10 +258,7 @@ describe("LexoBucketRank static helpers", () => {
   });
 
   it("compare works as a sort comparator", () => {
-    const list = [
-      new LexoBucketRank("0", "z"),
-      new LexoBucketRank("0", "a")
-    ];
+    const list = [new LexoBucketRank("0", "z"), new LexoBucketRank("0", "a")];
     list.sort(LexoBucketRank.compare);
     expect(list.map((r) => r.toString())).toEqual(["0|a", "0|z"]);
   });
@@ -352,9 +349,15 @@ describe("LexoBucketRank static helpers", () => {
 
 describe("LexoDecimalRank static helpers", () => {
   it("rankAfter / rankBefore / rankBetween default to middle", () => {
-    expect(LexoDecimalRank.rankAfter().toString()).toBe(LexoDecimalRank.middle().toString());
-    expect(LexoDecimalRank.rankBefore().toString()).toBe(LexoDecimalRank.middle().toString());
-    expect(LexoDecimalRank.rankBetween().toString()).toBe(LexoDecimalRank.middle().toString());
+    expect(LexoDecimalRank.rankAfter().toString()).toBe(
+      LexoDecimalRank.middle().toString()
+    );
+    expect(LexoDecimalRank.rankBefore().toString()).toBe(
+      LexoDecimalRank.middle().toString()
+    );
+    expect(LexoDecimalRank.rankBetween().toString()).toBe(
+      LexoDecimalRank.middle().toString()
+    );
   });
 
   it("rankBetween with both defined delegates to .between", () => {

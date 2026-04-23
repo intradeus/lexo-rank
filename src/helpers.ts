@@ -82,14 +82,10 @@ export function move<T extends DragCapable<T>>(
     throw new Error(`move indices must be integers (got from=${from}, to=${to})`);
   }
   if (from < 0 || from >= list.length) {
-    throw new RangeError(
-      `from index ${from} out of range [0, ${list.length - 1}]`
-    );
+    throw new RangeError(`from index ${from} out of range [0, ${list.length - 1}]`);
   }
   if (to < 0 || to >= list.length) {
-    throw new RangeError(
-      `to index ${to} out of range [0, ${list.length - 1}]`
-    );
+    throw new RangeError(`to index ${to} out of range [0, ${list.length - 1}]`);
   }
   if (from === to) return list[from]!;
 
@@ -242,9 +238,7 @@ export function nextBucketInRing(
 ): { target: string; isWrap: boolean } {
   const i = buckets.indexOf(current);
   if (i < 0) {
-    throw new Error(
-      `Bucket '${current}' is not one of [${buckets.join(", ")}]`
-    );
+    throw new Error(`Bucket '${current}' is not one of [${buckets.join(", ")}]`);
   }
   const target = buckets[(i + 1) % buckets.length]!;
   const isWrap = target < current;

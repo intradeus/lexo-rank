@@ -217,10 +217,7 @@ export class LexoRank {
   }
 
   /** Length-distribution summary — see `RankAnalysis`. */
-  static analyze(
-    ranks: readonly LexoRank[],
-    options?: AnalyzeOptions
-  ): RankAnalysis {
+  static analyze(ranks: readonly LexoRank[], options?: AnalyzeOptions): RankAnalysis {
     return analyzeRanks(ranks, options);
   }
 

@@ -1,6 +1,6 @@
 # lexo-rank
 
-A flexible LexoRank implementation in TypeScript. Generate string ranks that sort lexicographically and can be inserted between any two existing ranks without reindexing the rest of the list.
+A flexible LexoRank implementation in TypeScript. Generate string ranks that sort lexicographically and can be inserted between any two existing ranks without reindexing the rest of the list. Comes with helpers and a rebalance monitor, to help decide when a rebalance is required and how to execute it.
 
 Zero runtime dependencies. Ships ESM + CJS + `.d.ts`.
 
@@ -8,26 +8,23 @@ Zero runtime dependencies. Ships ESM + CJS + `.d.ts`.
 
 `bucket` and `decimal` are **independent toggles**. Turn either, both, or neither on, and you get one of four rank shapes:
 
-| Bucket | Decimal | Shape       | Class                   | Factory                                           |
-| :----: | :-----: | ----------- | ----------------------- | ------------------------------------------------- |
-|   ✗    |    ✗    | `abc`       | `LexoRank`              | `createLexoRank()`                                |
-|   ✓    |    ✗    | `0\|abc`    | `LexoBucketRank`        | `createLexoRank({ bucket: true })`                |
-|   ✗    |    ✓    | `abc:42`    | `LexoDecimalRank`       | `createLexoRank({ decimal: true })`               |
-|   ✓    |    ✓    | `0\|abc:42` | `LexoBucketDecimalRank` | `createLexoRank({ bucket: true, decimal: true })` |
+| Bucket | Decimal | Shape       | Class                                         | Factory                                           |
+| :----: | :-----: | ----------- | --------------------------------------------- | ------------------------------------------------- |
+|   ✗    |    ✗    | `abc`       | `LexoRank` (Base)                             | `createLexoRank()`                                |
+|   ✓    |    ✗    | `0\|abc`    | `LexoBucketRank` (Bucket+Base)                | `createLexoRank({ bucket: true })`                |
+|   ✗    |    ✓    | `abc:42`    | `LexoDecimalRank` (Base+Decimal)              | `createLexoRank({ decimal: true })`               |
+|   ✓    |    ✓    | `0\|abc:42` | `LexoBucketDecimalRank` (Bucket+Base+Decimal) | `createLexoRank({ bucket: true, decimal: true })` |
 
-Note : decimal doesn't only mean numerical decimals, it uses any character in the provided alphabet. The term decimal is used to describe the tail of a string, placed after a right-padded base, split by the provided separator.
+Note : decimal doesn't only mean numerical decimals, it uses any character in the provided alphabet. The term decimal is used to describe the tail of a string, placed after a right-padded base (aka 'integer') and split by the provided separator.
 
 Rules of thumb for picking a mode:
 
-- **Bucket?** Turn it on if you want a cheap "rebalance everything at once"
-  mechanism — migrate rows into the next bucket when the current one gets dense.
-  Not needed for small or infrequently-updated lists.
-- **Decimal?** Turn it on when you want the coarse rank to **stay short** even
-  under dense insertions. The integer part is fixed-width; neighbours that run
-  out of integer space grow a variable-length decimal tail instead of extending
-  the integer. Not needed if you don't mind ranks gradually getting longer.
-- **Bucket + Decimal (Full Jira format)** when you want to combine both, more
-  complex but works well with VERY large collections that have lots of hot paths.
+- **Base?** Easy, good enough for most use cases. Use this when you just want sortable strings with no extra ceremony. Good default for small-to-medium lists with reasonable insertion patterns; ranks grow logarithmically under random inserts. Upgrade to one of the modes below if you expect adversarial patterns or very large lists.
+- **Decimal?** Medium. Turn it on when you want the rank to **stay short** even under dense insertions. The "integer" part is fixed-width, neighbours that run out of integer space grow a variable-length decimal tail instead of extending the integer. Not needed if you don't mind ranks gradually getting longer.
+- **Bucket?** Hard. Turn it on if you want a cheap "rebalance everything at once" mechanism — migrate rows into the next bucket when the current one gets dense. Not needed for small or infrequently-updated lists.
+- **Bucket + Decimal (Full Jira format)** Harder. when you want to combine both, more complex but works well with VERY large collections that have lots of hot paths.
+
+If you don't know, best choice is to start on the simplest mode that fits, wire up the [rebalance monitor](#monitoring-rebalance-need), and upgrade only if you had to rebalance your ranks too many times.
 
 ## Install
 
@@ -105,8 +102,7 @@ LexoDecimalRank.between(
 ).toString(); // 'j00000:'  (plain integer midpoint, empty decimal)
 ```
 
-Think of this as base-36 "integer.decimal" arithmetic: the integer is the
-whole-number part, the decimal is the fractional refinement.
+Think of this as base-36 "integer.decimal" arithmetic: the integer is the whole-number part, the decimal is the fractional refinement.
 
 ### Bucket + Base + Decimal — `LexoBucketDecimalRank`
 
@@ -152,20 +148,20 @@ const R = createLexoRank({
 
 ### Options
 
-| Option               | Type                | Default         | Notes                                                             |
-| -------------------- | ------------------- | --------------- | ----------------------------------------------------------------- |
-| `alphabet`           | `Alphabet`          | `BASE36`        | Takes precedence over `range`/`samples`.                          |
-| `range`              | `string`            | —               | Range spec like `"0-9a-z"`; dashes between chars expand.          |
-| `samples`            | `readonly string[]` | —               | Infer the smallest alphabet covering every sample.                |
-| `bucket`             | `boolean`           | `false`         | Enable bucket prefix.                                             |
-| `decimal`            | `boolean`           | `false`         | Enable integer/decimal split.                                     |
-| `buckets`            | `readonly string[]` | `["0","1","2"]` | Bucket identifiers (see rules in the Bucket section).             |
-| `bucketSeparator`    | `string`            | `"\|"`          | Single character, not in alphabet, not in any bucket.             |
-| `decimalSeparator`   | `string`            | `":"`           | Single character, not in alphabet.                                |
-| `integerWidth`       | `number`            | `6`             | Positive integer ≤ `MAX_INTEGER_WIDTH` (256). Decimal-mode only.  |
-| `rebalanceThreshold` | `number`            | —               | Fire `onRebalanceNeeded` when a derived rank exceeds this length. Also overrides the default `maxThreshold` (30) used by `analyze`. |
-| `rebalanceAvgThreshold` | `number`         | —               | Override the default `avgThreshold` (15) used by `analyze`'s `recommendRebalance`. Not consulted by the monitor callback. |
-| `onRebalanceNeeded`  | `(rank) => void`    | —               | Sync callback fired when a derived rank exceeds the threshold. Setting this turns monitoring on; omit to disable. See the [Monitoring section](#monitoring-rebalance-need). |
+| Option                  | Type                | Default         | Notes                                                                                                                                                                       |
+| ----------------------- | ------------------- | --------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `alphabet`              | `Alphabet`          | `BASE36`        | Takes precedence over `range`/`samples`.                                                                                                                                    |
+| `range`                 | `string`            | —               | Range spec like `"0-9a-z"`; dashes between chars expand.                                                                                                                    |
+| `samples`               | `readonly string[]` | —               | Infer the smallest alphabet covering every sample.                                                                                                                          |
+| `bucket`                | `boolean`           | `false`         | Enable bucket prefix.                                                                                                                                                       |
+| `decimal`               | `boolean`           | `false`         | Enable integer/decimal split.                                                                                                                                               |
+| `buckets`               | `readonly string[]` | `["0","1","2"]` | Bucket identifiers (see rules in the Bucket section).                                                                                                                       |
+| `bucketSeparator`       | `string`            | `"\|"`          | Single character, not in alphabet, not in any bucket.                                                                                                                       |
+| `decimalSeparator`      | `string`            | `":"`           | Single character, not in alphabet.                                                                                                                                          |
+| `integerWidth`          | `number`            | `6`             | Positive integer ≤ `MAX_INTEGER_WIDTH` (256). Decimal-mode only.                                                                                                            |
+| `rebalanceThreshold`    | `number`            | —               | Fire `onRebalanceNeeded` when a derived rank exceeds this length. Also overrides the default `maxThreshold` (30) used by `analyze`.                                         |
+| `rebalanceAvgThreshold` | `number`            | —               | Override the default `avgThreshold` (15) used by `analyze`'s `recommendRebalance`. Not consulted by the monitor callback.                                                   |
+| `onRebalanceNeeded`     | `(rank) => void`    | —               | Sync callback fired when a derived rank exceeds the threshold. Setting this turns monitoring on; omit to disable. See the [Monitoring section](#monitoring-rebalance-need). |
 
 ## API (common shape)
 
@@ -192,16 +188,16 @@ Every class also exposes a static `compare(a, b)` — see [Ergonomic helpers](#e
 
 Every rank class and the factory module expose a common set of helpers on top of the minimal core. Use these to avoid re-implementing the patterns that trip most teams up the first time they wire lexorank into a UI.
 
-| Helper                       | What it does                                                                                     |
-| ---------------------------- | ------------------------------------------------------------------------------------------------ |
-| `R.rankAfter(prev?)`         | Rank > `prev`. If `prev` is omitted (empty list), returns `middle()`.                            |
-| `R.rankBefore(next?)`        | Rank < `next`. If `next` is omitted, returns `middle()`.                                         |
-| `R.rankBetween(a?, b?)`      | Combined variant — either, both, or neither of `a`/`b` may be absent. One call per drop target.  |
-| `R.compare`                  | Sort comparator. `arr.sort(R.compare)` works unbound.                                            |
-| `R.move(list, from, to)`     | New rank for moving `list[from]` to position `to`. Returns `list[from]` unchanged when equal.    |
-| `R.isValid(raw)`             | Non-throwing parse. `true` iff `raw` parses without throwing.                                   |
-| `R.analyze(ranks)`           | Length-distribution summary: `{ count, max, avg, p95, recommendRebalance }`.                     |
-| `R.planRebalance(current?)`  | **Bucket variants only.** Plans the next migration step in the ring — see [Rebalancing](#rebalancing). |
+| Helper                      | What it does                                                                                           |
+| --------------------------- | ------------------------------------------------------------------------------------------------------ |
+| `R.rankAfter(prev?)`        | Rank > `prev`. If `prev` is omitted (empty list), returns `middle()`.                                  |
+| `R.rankBefore(next?)`       | Rank < `next`. If `next` is omitted, returns `middle()`.                                               |
+| `R.rankBetween(a?, b?)`     | Combined variant — either, both, or neither of `a`/`b` may be absent. One call per drop target.        |
+| `R.compare`                 | Sort comparator. `arr.sort(R.compare)` works unbound.                                                  |
+| `R.move(list, from, to)`    | New rank for moving `list[from]` to position `to`. Returns `list[from]` unchanged when equal.          |
+| `R.isValid(raw)`            | Non-throwing parse. `true` iff `raw` parses without throwing.                                          |
+| `R.analyze(ranks)`          | Length-distribution summary: `{ count, max, avg, p95, recommendRebalance }`.                           |
+| `R.planRebalance(current?)` | **Bucket variants only.** Plans the next migration step in the ring — see [Rebalancing](#rebalancing). |
 
 ### Drag-and-drop in one call
 
@@ -211,10 +207,10 @@ Every rank class and the factory module expose a common set of helpers on top of
 const R = createLexoRank();
 
 // Inserting into an empty list
-R.rankBetween();                      // → middle
+R.rankBetween(); // → middle
 
 // Inserting at the head
-R.rankBetween(undefined, list[0]);    // → less than list[0]
+R.rankBetween(undefined, list[0]); // → less than list[0]
 
 // Inserting at the tail
 R.rankBetween(list[list.length - 1]); // → greater than the last
@@ -261,31 +257,26 @@ Or ignore the recommendation entirely and read the raw `max` / `avg` / `p95` sta
 
 ```ts
 const R = createLexoRank({ decimal: true });
-R.isValid("i00000:");  // true
-R.isValid("i:");       // true — short integer parts get right-padded
-R.isValid("i00000");   // false — missing decimal separator
-R.isValid("");         // false
+R.isValid("i00000:"); // true
+R.isValid("i:"); // true — short integer parts get right-padded
+R.isValid("i00000"); // false — missing decimal separator
+R.isValid(""); // false
 ```
 
 Same semantics as `R.parse(raw)` throwing, just without the try/catch.
-Note it's a parse check, not a string-equality check — e.g. `"i:"` is valid
-because it parses, but it renders back as `"i00000:"` under the default
-`integerWidth` of 6.
+Note it's a parse check, not a string-equality check — e.g. `"i:"` is valid because it parses, but it renders back as `"i00000:"` under the default `integerWidth` of 6.
 
 ### `safe*` variants — return `undefined` instead of throwing
 
-Every throw-on-failure helper has a `safe*` counterpart for callers who want
-to handle bad input without wrapping each call in a try/catch. They return
-`T | undefined` — the rank on success, `undefined` on any failure (invalid
-input, equal bounds, absolute-boundary hit, bucket mismatch, etc.).
+Every throw-on-failure helper has a `safe*` counterpart for callers who want to handle bad input without wrapping each call in a try/catch. They return `T | undefined` — the rank on success, `undefined` on any failure (invalid input, equal bounds, absolute-boundary hit, bucket mismatch, etc.).
 
-| Strict (throws)         | Safe (`T \| undefined`) |
-| ----------------------- | ----------------------- |
-| `R.parse(raw)`          | `R.safeParse(raw)`      |
-| `R.rankAfter(prev?)`    | `R.safeRankAfter(prev?)` |
-| `R.rankBefore(next?)`   | `R.safeRankBefore(next?)` |
-| `R.rankBetween(a?, b?)` | `R.safeRankBetween(a?, b?)` |
-| `R.move(list, from, to)`| `R.safeMove(list, from, to)` |
+| Strict (throws)          | Safe (`T \| undefined`)      |
+| ------------------------ | ---------------------------- |
+| `R.parse(raw)`           | `R.safeParse(raw)`           |
+| `R.rankAfter(prev?)`     | `R.safeRankAfter(prev?)`     |
+| `R.rankBefore(next?)`    | `R.safeRankBefore(next?)`    |
+| `R.rankBetween(a?, b?)`  | `R.safeRankBetween(a?, b?)`  |
+| `R.move(list, from, to)` | `R.safeMove(list, from, to)` |
 
 ```ts
 const R = createLexoRank();
@@ -299,16 +290,11 @@ const parsed = rows
   .filter((r): r is NonNullable<typeof r> => r !== undefined);
 ```
 
-`isValid(raw)` and `safeParse(raw)` are complements — use `isValid` when you
-only need the boolean, `safeParse` when you want the parsed value or
-`undefined` in one call.
+`isValid(raw)` and `safeParse(raw)` are complements — use `isValid` when you only need the boolean, `safeParse` when you want the parsed value or `undefined` in one call.
 
 ## Monitoring rebalance need
 
-You rarely want to watch rank length yourself from the outside. Hand the
-library a callback and a threshold instead; it fires the callback whenever a
-freshly-derived rank exceeds the threshold — a reliable signal that the rank
-space in a given bucket is getting dense.
+You rarely want to watch rank length yourself from the outside. Hand the library a callback and a threshold instead; it fires the callback whenever a freshly-derived rank exceeds the threshold — a reliable signal that the rank space in a given bucket is getting dense.
 
 ```ts
 const R = createLexoRank({
@@ -322,39 +308,23 @@ const R = createLexoRank({
 
 **Contract:**
 
-- Monitoring is active whenever `onRebalanceNeeded` is set. `rebalanceThreshold`
-  is optional — omit it to use the library default (30). To disable monitoring,
-  leave `onRebalanceNeeded` unset.
-- The callback fires **only on ranks that were derived** from existing ones
-  — specifically `between` (static and instance), `genNext`, and `genPrev`.
-- **Does NOT fire** on: direct constructors, `parse`, `min`, `max`, `middle`,
-  or `inBucket`. Loading stored ranks, seeding the list, or moving a rank
-  sideways into another bucket isn't new work; there's nothing actionable
-  to report.
-- The callback is **synchronous** — it runs inside the method that produced
-  the rank, before that method returns. If you want to do async work, do it
-  fire-and-forget inside your handler and manage your own errors.
-- **No deduping** — fires once per triggering call. Debounce or throttle in
-  your handler if you don't want to process every fire (e.g. "only enqueue
-  once per bucket per minute").
-- The monitor is inherited automatically: if `a` has a monitor and you call
-  `a.between(b)` or `a.genNext()`, the derivative rank carries the same
-  monitor, so a chain of generated ranks all feed the same handler.
+- Monitoring is active whenever `onRebalanceNeeded` is set. `rebalanceThreshold` is optional — omit it to use the library default (30). To disable monitoring, leave `onRebalanceNeeded` unset.
+- The callback fires **only on ranks that were derived** from existing ones, specifically `between` (static and instance), `genNext`, and `genPrev`.
+- **Does NOT fire** on: direct constructors, `parse`, `min`, `max`, `middle`, or `inBucket`. Loading stored ranks, seeding the list, or moving a rank sideways into another bucket isn't new work; there's nothing actionable to report.
+- The callback is **synchronous** — it runs inside the method that produced the rank, before that method returns. If you want to do async work, do it fire-and-forget inside your handler and manage your own errors.
+- **No deduping** — fires once per triggering call. Debounce or throttle in your handler if you don't want to process every fire (e.g. "only enqueue once per bucket per minute").
+- The monitor is inherited automatically: if `a` has a monitor and you call `a.between(b)` or `a.genNext()`, the derivative rank carries the same monitor, so a chain of generated ranks all feed the same handler.
 
 ## Alphabet helpers
 
 - Presets: `NUMERIC`, `LOWER_ALPHA`, `UPPER_ALPHA`, `BASE36`, `BASE62`.
-- `new StringAlphabet(chars)` — custom alphabet. Must be **≥ 4 strictly
-  ascending characters** and contain only **BMP single UTF-16 code units**
-  (surrogate pairs / most emoji are rejected).
+- `new StringAlphabet(chars)` — custom alphabet. Must be **≥ 4 strictly ascending characters** and contain only **BMP single UTF-16 code units** (surrogate pairs / most emoji are rejected).
 - `alphabetFromRange("0-9a-z")` — expand a range spec.
 - `alphabetFromSamples([...])` — minimum alphabet covering the samples.
 
 ## Low-level primitives
 
-These are the raw building blocks most users won't touch directly — they
-power the class/module APIs documented above. Reach for them if you're
-avoiding class allocation in a hot path or composing your own helpers.
+These are the raw building blocks most users won't touch directly — they power the class/module APIs documented above. Reach for them if you're avoiding class allocation in a hot path or composing your own helpers.
 
 ```ts
 import {
@@ -467,7 +437,7 @@ const fresh = plan.ranks(rows.length);
 //    Forward migrations (0→1, 1→2): highest rank first.
 //    Wrap migration (2→0): lowest rank first.
 const writeOrder = plan.isWrap ? rows : [...rows].reverse();
-const rankOrder  = plan.isWrap ? fresh : [...fresh].reverse();
+const rankOrder = plan.isWrap ? fresh : [...fresh].reverse();
 for (let i = 0; i < writeOrder.length; i++) {
   await db.update(writeOrder[i].id, { rank: rankOrder[i].toString() });
 }

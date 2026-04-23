@@ -61,8 +61,7 @@ describe("factory module: helper surface — simple", () => {
     const list = Strict.evenlySpaced(5);
     // Pass large overrides at call site — should win over module config.
     expect(
-      Strict.analyze(list, { maxThreshold: 999, avgThreshold: 999 })
-        .recommendRebalance
+      Strict.analyze(list, { maxThreshold: 999, avgThreshold: 999 }).recommendRebalance
     ).toBe(false);
   });
 
@@ -124,9 +123,10 @@ describe("factory module: helper surface — bucket", () => {
     const plan = R.planRebalance("0");
     const oldRanks = LexoBucketRank.evenlySpaced(3, { activeBucket: "0" });
     const fresh = plan.ranks(3);
-    for (const o of oldRanks) for (const n of fresh) {
-      expect(o.compareTo(n)).toBe(-1);
-    }
+    for (const o of oldRanks)
+      for (const n of fresh) {
+        expect(o.compareTo(n)).toBe(-1);
+      }
   });
 });
 

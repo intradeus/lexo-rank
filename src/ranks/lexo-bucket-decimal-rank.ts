@@ -346,19 +346,12 @@ export class LexoBucketDecimalRank {
   }
 
   /** Sort comparator, usable unbound with `Array#sort`. */
-  static compare(
-    this: void,
-    a: LexoBucketDecimalRank,
-    b: LexoBucketDecimalRank
-  ): number {
+  static compare(this: void, a: LexoBucketDecimalRank, b: LexoBucketDecimalRank): number {
     return a.compareTo(b);
   }
 
   /** Non-throwing parse under the given config. */
-  static isValid(
-    raw: unknown,
-    config: LexoBucketDecimalRankConfig = {}
-  ): boolean {
+  static isValid(raw: unknown, config: LexoBucketDecimalRankConfig = {}): boolean {
     if (typeof raw !== "string") return false;
     return safeParse(() => LexoBucketDecimalRank.parse(raw, config)) !== undefined;
   }

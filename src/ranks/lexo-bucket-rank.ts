@@ -341,8 +341,7 @@ export class LexoBucketRank {
       currentBucket: current,
       targetBucket: target,
       isWrap,
-      ranks: (count: number) =>
-        LexoBucketRank.evenlySpacedInBucket(target, count, config)
+      ranks: (count: number) => LexoBucketRank.evenlySpacedInBucket(target, count, config)
     };
   }
 
