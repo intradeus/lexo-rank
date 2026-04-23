@@ -1,6 +1,6 @@
 {
   "name": "@intradeus/lexo-rank",
-  "version": "0.1.1",
+  "version": "1.0.0",
   "description": "A flexible LexoRank implementation with simple, bucket and decimal variants",
   "type": "module",
   "sideEffects": false,
