@@ -1,7 +1,7 @@
 {
-  "name": "lexo-rank",
+  "name": "@intradeus/lexo-rank",
   "version": "0.1.0",
-  "description": "A flexible LexoRank implementation with simple, bucket, decimal, and bucket+decimal variants and custom alphabet support",
+  "description": "A flexible LexoRank implementation with simple, bucket and decimal variants",
   "type": "module",
   "sideEffects": false,
   "main": "./dist/index.cjs",
@@ -29,7 +29,21 @@
     "format:check": "prettier --check .",
     "typecheck": "tsc --noEmit",
     "smoke": "node scripts/smoke.mjs",
-    "prepublishOnly": "npm run typecheck && npm run test && npm run build && npm run smoke"
+    "prepublishOnly": "npm run typecheck && npm run test && npm run build && npm run smoke",
+    "release:patch": "npm version patch && git push --follow-tags",
+    "release:minor": "npm version minor && git push --follow-tags",
+    "release:major": "npm version major && git push --follow-tags"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/intradeus/lexo-rank.git"
+  },
+  "homepage": "https://github.com/intradeus/lexo-rank#readme",
+  "bugs": {
+    "url": "https://github.com/intradeus/lexo-rank/issues"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "keywords": [
     "lexorank",

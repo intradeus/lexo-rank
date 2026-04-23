@@ -1,0 +1,31 @@
+name: Publish
+
+on:
+  push:
+    tags: ["v*"]
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+          registry-url: https://registry.npmjs.org
+          cache: npm
+      # Trusted publishing (OIDC) requires npm ≥ 11.5.1;
+      - run: npm install -g npm@latest
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+      - run: npm run smoke
+      # No NODE_AUTH_TOKEN: npm exchanges the workflow's OIDC token for a
+      # short-lived publish credential. Configure the Trusted Publisher on
+      # npmjs.com → package settings → Publishing access.
+      - run: npm publish

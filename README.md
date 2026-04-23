@@ -29,13 +29,13 @@ If you don't know, best choice is to start on the simplest mode that fits, wire 
 ## Install
 
 ```sh
-npm install lexo-rank
+npm install @intradeus/lexo-rank
 ```
 
 ## Quick start
 
 ```ts
-import { LexoRank } from "lexo-rank";
+import { LexoRank } from "@intradeus/lexo-rank";
 
 // Defaults to the BASE36 alphabet (0-9a-z).
 const first = LexoRank.min(); // '1'
@@ -122,7 +122,7 @@ LexoBucketDecimalRank.parse("0|hzzzzr:");
 One entry point that builds any of the four variants based on the boolean toggles. The return type narrows so the instance is strongly typed.
 
 ```ts
-import { createLexoRank, BASE62 } from "lexo-rank";
+import { createLexoRank, BASE62 } from "@intradeus/lexo-rank";
 
 createLexoRank(); // → LexoRank
 createLexoRank({ bucket: true }); // → LexoBucketRank
@@ -335,7 +335,7 @@ import {
   nextBucketInRing,
   safeParse,
   MAX_RANK_LENGTH
-} from "lexo-rank";
+} from "@intradeus/lexo-rank";
 
 // genBetween is the core algorithm; rankBetween defaults to BASE36.
 // Both operate on raw strings — no rank-class instances involved.
