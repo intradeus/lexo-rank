@@ -17,6 +17,7 @@ import {
   LexoDecimalRank
 } from "./ranks/lexo-decimal-rank";
 import { LexoBucketDecimalRank } from "./ranks/lexo-bucket-decimal-rank";
+import type { AnalyzeOptions, RankAnalysis, RebalancePlan } from "./helpers";
 
 /**
  * Broadest rank type — useful when writing a handler that the factory
@@ -57,8 +58,17 @@ export interface CreateLexoRankOptions {
    * Fire `onRebalanceNeeded` whenever a newly-constructed rank's rendered
    * length exceeds this number. Monitoring is only active when both
    * `rebalanceThreshold` and `onRebalanceNeeded` are provided.
+   *
+   * Also used by `analyze` as the default `maxThreshold` for
+   * `recommendRebalance` — so one value drives both signals.
    */
   rebalanceThreshold?: number;
+  /**
+   * Default `avgThreshold` for `analyze`'s `recommendRebalance`. Has no
+   * effect on the per-rank monitor callback — that one only looks at
+   * individual lengths via `rebalanceThreshold`.
+   */
+  rebalanceAvgThreshold?: number;
   /**
    * Synchronous callback fired from the rank constructor when
    * `rebalanceThreshold` is exceeded. Runs once per rank construction that
@@ -86,11 +96,39 @@ export interface LexoRankModule<T> {
   min(): T;
   max(): T;
   middle(): T;
-  between(a: T, b: T): T;
   parse(raw: string): T;
   from(raw: string): T;
   /** `count` ranks evenly spaced across the safe range of the active bucket. */
   evenlySpaced(count: number): T[];
+  /** Sort comparator; `arr.sort(R.compare)` works unbound. */
+  readonly compare: (this: void, a: T, b: T) => number;
+  /** "Insert after `prev`" — `prev` optional. Falls back to `middle()`. */
+  rankAfter(prev?: T): T;
+  /** "Insert before `next`" — `next` optional. Falls back to `middle()`. */
+  rankBefore(next?: T): T;
+  /** Combined variant; covers every insertion boundary with one call. */
+  rankBetween(a?: T, b?: T): T;
+  /** Compute the new rank for moving `list[from]` to position `to`. */
+  move(list: readonly T[], from: number, to: number): T;
+  /** Non-throwing parse. Returns `true` iff `raw` round-trips as a rank. */
+  isValid(raw: string): boolean;
+  /**
+   * Every throw-on-failure method above has a `safe*` counterpart that swallows
+   * the exception and returns `undefined`. Use these at boundaries where you'd
+   * otherwise wrap the call in a try/catch (UI drag-and-drop, data import,
+   * form validation).
+   */
+  safeParse(raw: unknown): T | undefined;
+  safeRankAfter(prev?: T): T | undefined;
+  safeRankBefore(next?: T): T | undefined;
+  safeRankBetween(a?: T, b?: T): T | undefined;
+  safeMove(list: readonly T[], from: number, to: number): T | undefined;
+  /**
+   * Length-distribution summary — see `RankAnalysis`. Thresholds default to
+   * the module's `rebalanceThreshold` / `rebalanceAvgThreshold`; per-call
+   * `options` override them.
+   */
+  analyze(ranks: readonly T[], options?: AnalyzeOptions): RankAnalysis;
 }
 
 /**
@@ -100,6 +138,13 @@ export interface LexoRankModule<T> {
 export interface LexoBucketRankModule<T> extends LexoRankModule<T> {
   /** `count` ranks evenly spaced in the named bucket; for online migration. */
   evenlySpacedInBucket(bucketName: string, count: number): T[];
+  /**
+   * Plan a rebalance migration step. Defaults `currentBucket` to the
+   * module's configured `activeBucket` (or `buckets[0]`). Returns the next
+   * target bucket in the ring, a wrap flag for migration-direction logic,
+   * and a generator for fresh evenly-spaced ranks in the target bucket.
+   */
+  planRebalance(currentBucket?: string): RebalancePlan<T>;
 }
 
 // Overloads: the concrete class depends on which booleans are set.
@@ -141,6 +186,21 @@ export function createLexoRank(
   // runtime because the constructor only ever passes its own instance.
   const monitorFields = buildMonitorFields(options);
 
+  // `analyze`'s per-call options win over the module-configured thresholds,
+  // which win over the library defaults. Factored out so every mode below
+  // wires the same merge without repeating it.
+  const analyzeDefaults: AnalyzeOptions = {};
+  if (options.rebalanceThreshold !== undefined) {
+    analyzeDefaults.maxThreshold = options.rebalanceThreshold;
+  }
+  if (options.rebalanceAvgThreshold !== undefined) {
+    analyzeDefaults.avgThreshold = options.rebalanceAvgThreshold;
+  }
+  const mergeAnalyze = (callerOptions?: AnalyzeOptions): AnalyzeOptions => ({
+    ...analyzeDefaults,
+    ...callerOptions
+  });
+
   const activeBucket = options.activeBucket;
 
   if (bucket && decimal) {
@@ -160,12 +220,28 @@ export function createLexoRank(
       min: () => LexoBucketDecimalRank.min(config),
       max: () => LexoBucketDecimalRank.max(config),
       middle: () => LexoBucketDecimalRank.middle(config),
-      between: (a, b) => LexoBucketDecimalRank.between(a, b),
       parse: (raw) => LexoBucketDecimalRank.parse(raw, config),
       from: (raw) => LexoBucketDecimalRank.parse(raw, config),
       evenlySpaced: (count) => LexoBucketDecimalRank.evenlySpaced(count, config),
       evenlySpacedInBucket: (bucketName, count) =>
-        LexoBucketDecimalRank.evenlySpacedInBucket(bucketName, count, config)
+        LexoBucketDecimalRank.evenlySpacedInBucket(bucketName, count, config),
+      compare: LexoBucketDecimalRank.compare,
+      rankAfter: (prev) => LexoBucketDecimalRank.rankAfter(prev, config),
+      rankBefore: (next) => LexoBucketDecimalRank.rankBefore(next, config),
+      rankBetween: (a, b) => LexoBucketDecimalRank.rankBetween(a, b, config),
+      move: (list, from, to) =>
+        LexoBucketDecimalRank.move(list, from, to, config),
+      isValid: (raw) => LexoBucketDecimalRank.isValid(raw, config),
+      analyze: (ranks, opts) =>
+        LexoBucketDecimalRank.analyze(ranks, mergeAnalyze(opts)),
+      safeParse: (raw) => LexoBucketDecimalRank.safeParse(raw, config),
+      safeRankAfter: (prev) => LexoBucketDecimalRank.safeRankAfter(prev, config),
+      safeRankBefore: (next) => LexoBucketDecimalRank.safeRankBefore(next, config),
+      safeRankBetween: (a, b) => LexoBucketDecimalRank.safeRankBetween(a, b, config),
+      safeMove: (list, from, to) =>
+        LexoBucketDecimalRank.safeMove(list, from, to, config),
+      planRebalance: (currentBucket) =>
+        LexoBucketDecimalRank.planRebalance(currentBucket, config)
     };
     return mod;
   }
@@ -185,12 +261,26 @@ export function createLexoRank(
       min: () => LexoBucketRank.min(config),
       max: () => LexoBucketRank.max(config),
       middle: () => LexoBucketRank.middle(config),
-      between: (a, b) => LexoBucketRank.between(a, b),
       parse: (raw) => LexoBucketRank.parse(raw, config),
       from: (raw) => LexoBucketRank.parse(raw, config),
       evenlySpaced: (count) => LexoBucketRank.evenlySpaced(count, config),
       evenlySpacedInBucket: (bucketName, count) =>
-        LexoBucketRank.evenlySpacedInBucket(bucketName, count, config)
+        LexoBucketRank.evenlySpacedInBucket(bucketName, count, config),
+      compare: LexoBucketRank.compare,
+      rankAfter: (prev) => LexoBucketRank.rankAfter(prev, config),
+      rankBefore: (next) => LexoBucketRank.rankBefore(next, config),
+      rankBetween: (a, b) => LexoBucketRank.rankBetween(a, b, config),
+      move: (list, from, to) => LexoBucketRank.move(list, from, to, config),
+      isValid: (raw) => LexoBucketRank.isValid(raw, config),
+      analyze: (ranks, opts) => LexoBucketRank.analyze(ranks, mergeAnalyze(opts)),
+      safeParse: (raw) => LexoBucketRank.safeParse(raw, config),
+      safeRankAfter: (prev) => LexoBucketRank.safeRankAfter(prev, config),
+      safeRankBefore: (next) => LexoBucketRank.safeRankBefore(next, config),
+      safeRankBetween: (a, b) => LexoBucketRank.safeRankBetween(a, b, config),
+      safeMove: (list, from, to) =>
+        LexoBucketRank.safeMove(list, from, to, config),
+      planRebalance: (currentBucket) =>
+        LexoBucketRank.planRebalance(currentBucket, config)
     };
     return mod;
   }
@@ -209,10 +299,22 @@ export function createLexoRank(
       min: () => LexoDecimalRank.min(config),
       max: () => LexoDecimalRank.max(config),
       middle: () => LexoDecimalRank.middle(config),
-      between: (a, b) => LexoDecimalRank.between(a, b),
       parse: (raw) => LexoDecimalRank.parse(raw, config),
       from: (raw) => LexoDecimalRank.parse(raw, config),
-      evenlySpaced: (count) => LexoDecimalRank.evenlySpaced(count, config)
+      evenlySpaced: (count) => LexoDecimalRank.evenlySpaced(count, config),
+      compare: LexoDecimalRank.compare,
+      rankAfter: (prev) => LexoDecimalRank.rankAfter(prev, config),
+      rankBefore: (next) => LexoDecimalRank.rankBefore(next, config),
+      rankBetween: (a, b) => LexoDecimalRank.rankBetween(a, b, config),
+      move: (list, from, to) => LexoDecimalRank.move(list, from, to, config),
+      isValid: (raw) => LexoDecimalRank.isValid(raw, config),
+      analyze: (ranks, opts) => LexoDecimalRank.analyze(ranks, mergeAnalyze(opts)),
+      safeParse: (raw) => LexoDecimalRank.safeParse(raw, config),
+      safeRankAfter: (prev) => LexoDecimalRank.safeRankAfter(prev, config),
+      safeRankBefore: (next) => LexoDecimalRank.safeRankBefore(next, config),
+      safeRankBetween: (a, b) => LexoDecimalRank.safeRankBetween(a, b, config),
+      safeMove: (list, from, to) =>
+        LexoDecimalRank.safeMove(list, from, to, config)
     };
     return mod;
   }
@@ -222,6 +324,7 @@ export function createLexoRank(
   // object; reshape the fields helper into that arity.
   const lrMonitor =
     simpleMonitor.rebalanceThreshold !== undefined ||
+    simpleMonitor.rebalanceAvgThreshold !== undefined ||
     simpleMonitor.onRebalanceNeeded !== undefined
       ? simpleMonitor
       : undefined;
@@ -232,10 +335,24 @@ export function createLexoRank(
     min: () => LexoRank.min(alphabet, lrMonitor),
     max: () => LexoRank.max(alphabet, lrMonitor),
     middle: () => LexoRank.middle(alphabet, lrMonitor),
-    between: (a, b) => LexoRank.between(a, b),
     parse: (raw) => new LexoRank(raw, alphabet, lrMonitor),
     from: (raw) => new LexoRank(raw, alphabet, lrMonitor),
-    evenlySpaced: (count) => LexoRank.evenlySpaced(count, alphabet, lrMonitor)
+    evenlySpaced: (count) => LexoRank.evenlySpaced(count, alphabet, lrMonitor),
+    compare: LexoRank.compare,
+    rankAfter: (prev) => LexoRank.rankAfter(prev, alphabet, lrMonitor),
+    rankBefore: (next) => LexoRank.rankBefore(next, alphabet, lrMonitor),
+    rankBetween: (a, b) => LexoRank.rankBetween(a, b, alphabet, lrMonitor),
+    move: (list, from, to) =>
+      LexoRank.move(list, from, to, alphabet, lrMonitor),
+    isValid: (raw) => LexoRank.isValid(raw, alphabet),
+    analyze: (ranks, opts) => LexoRank.analyze(ranks, mergeAnalyze(opts)),
+    safeParse: (raw) => LexoRank.safeParse(raw, alphabet, lrMonitor),
+    safeRankAfter: (prev) => LexoRank.safeRankAfter(prev, alphabet, lrMonitor),
+    safeRankBefore: (next) => LexoRank.safeRankBefore(next, alphabet, lrMonitor),
+    safeRankBetween: (a, b) =>
+      LexoRank.safeRankBetween(a, b, alphabet, lrMonitor),
+    safeMove: (list, from, to) =>
+      LexoRank.safeMove(list, from, to, alphabet, lrMonitor)
   };
   return mod;
 }
@@ -268,13 +385,21 @@ function assertBooleanOrUndefined(value: unknown, name: string): void {
  */
 function buildMonitorFields<T extends AnyLexoRank>(
   options: CreateLexoRankOptions
-): { rebalanceThreshold?: number; onRebalanceNeeded?: (rank: T) => void } {
+): {
+  rebalanceThreshold?: number;
+  rebalanceAvgThreshold?: number;
+  onRebalanceNeeded?: (rank: T) => void;
+} {
   const fields: {
     rebalanceThreshold?: number;
+    rebalanceAvgThreshold?: number;
     onRebalanceNeeded?: (rank: T) => void;
   } = {};
   if (options.rebalanceThreshold !== undefined) {
     fields.rebalanceThreshold = options.rebalanceThreshold;
+  }
+  if (options.rebalanceAvgThreshold !== undefined) {
+    fields.rebalanceAvgThreshold = options.rebalanceAvgThreshold;
   }
   if (options.onRebalanceNeeded !== undefined) {
     fields.onRebalanceNeeded = options.onRebalanceNeeded;

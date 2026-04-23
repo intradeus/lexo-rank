@@ -55,7 +55,12 @@ function exerciseSurface(mod, label) {
     "DEFAULT_DECIMAL_SEPARATOR",
     "DEFAULT_INTEGER_WIDTH",
     "MAX_INTEGER_WIDTH",
-    "MAX_RANK_LENGTH"
+    "MAX_RANK_LENGTH",
+    "analyze",
+    "nextBucketInRing",
+    "safeParse",
+    "DEFAULT_REBALANCE_MAX_THRESHOLD",
+    "DEFAULT_REBALANCE_AVG_THRESHOLD"
   ];
   const missing = expected.filter((name) => mod[name] === undefined);
   assert.equal(missing.length, 0, `[${label}] missing exports: ${missing.join(", ")}`);
@@ -75,7 +80,7 @@ function exerciseSurface(mod, label) {
     const lo = R.min();
     const hi = R.max();
     const mid = R.middle();
-    const between = R.between(lo, hi);
+    const between = R.rankBetween(lo, hi);
     const parsed = R.parse(mid.toString());
 
     assert.ok(lo instanceof expectInstance, `[${label}] min() instance`);
@@ -152,6 +157,74 @@ function exerciseSurface(mod, label) {
     }
   }
 
+  // Helper surface smoke — exercise the class statics and factory module.
+  const R = mod.createLexoRank();
+  assert.equal(
+    R.rankAfter().toString(),
+    R.middle().toString(),
+    `[${label}] rankAfter() defaults to middle`
+  );
+  assert.equal(
+    R.rankBefore().toString(),
+    R.middle().toString(),
+    `[${label}] rankBefore() defaults to middle`
+  );
+  assert.equal(
+    R.rankBetween().toString(),
+    R.middle().toString(),
+    `[${label}] rankBetween() defaults to middle`
+  );
+  const rAfter = R.rankAfter(R.parse("c"));
+  assert.equal(R.parse("c").compareTo(rAfter), -1, `[${label}] rankAfter ordering`);
+  const sample = ["z", "a", "m"].map((v) => R.parse(v));
+  sample.sort(R.compare);
+  assert.equal(sample.map((r) => r.toString()).join(","), "a,m,z", `[${label}] compare`);
+  assert.equal(R.isValid("a"), true, `[${label}] isValid true`);
+  assert.equal(R.isValid(""), false, `[${label}] isValid false`);
+  const list = R.evenlySpaced(6);
+  const moved = R.move(list, 0, 5);
+  assert.equal(list[5].compareTo(moved), -1, `[${label}] move places after last`);
+  const analysis = R.analyze(list);
+  assert.equal(analysis.count, 6, `[${label}] analyze count`);
+  assert.equal(analysis.recommendRebalance, false, `[${label}] analyze recommend`);
+
+  // planRebalance on bucket modules.
+  const Rb = mod.createLexoRank({ bucket: true });
+  const plan = Rb.planRebalance("0");
+  assert.equal(plan.targetBucket, "1", `[${label}] planRebalance target`);
+  assert.equal(plan.isWrap, false, `[${label}] planRebalance forward`);
+  const fresh2 = plan.ranks(4);
+  assert.equal(fresh2.length, 4, `[${label}] planRebalance ranks count`);
+  assert.ok(
+    fresh2.every((r) => r.bucket === "1"),
+    `[${label}] planRebalance ranks bucket`
+  );
+  const wrap = Rb.planRebalance("2");
+  assert.equal(wrap.targetBucket, "0", `[${label}] planRebalance wrap target`);
+  assert.equal(wrap.isWrap, true, `[${label}] planRebalance wrap flag`);
+
+  // safe* variants return undefined on failure, real value on success.
+  assert.equal(R.safeParse(""), undefined, `[${label}] safeParse empty`);
+  assert.equal(R.safeParse("a")?.toString(), "a", `[${label}] safeParse ok`);
+  assert.equal(
+    R.safeRankAfter(R.parse("z")),
+    undefined,
+    `[${label}] safeRankAfter at max`
+  );
+  assert.equal(
+    R.safeRankBetween(R.parse("a"), R.parse("a")),
+    undefined,
+    `[${label}] safeRankBetween equal`
+  );
+  assert.equal(R.safeMove([], 0, 0), undefined, `[${label}] safeMove empty`);
+
+  // Top-level helper exports.
+  assert.equal(typeof mod.analyze, "function", `[${label}] analyze export`);
+  assert.equal(typeof mod.safeParse, "function", `[${label}] safeParse export`);
+  const ring = mod.nextBucketInRing(["0", "1", "2"], "2");
+  assert.equal(ring.target, "0", `[${label}] nextBucketInRing wrap`);
+  assert.equal(ring.isWrap, true, `[${label}] nextBucketInRing flag`);
+
   // rebalance monitor smoke — fires on between, not on seeds/parse.
   let fires = 0;
   const monitored = mod.createLexoRank({
@@ -166,7 +239,7 @@ function exerciseSurface(mod, label) {
   monitored.middle();
   monitored.parse(monitored.middle().toString());
   assert.equal(fires, 0, `[${label}] monitor skipped seeds and parse`);
-  monitored.between(monitored.min(), monitored.max());
+  monitored.rankBetween(monitored.min(), monitored.max());
   assert.equal(fires, 1, `[${label}] monitor fired on between`);
 }
 

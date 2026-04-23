@@ -1,6 +1,16 @@
 import { BASE36, type Alphabet } from "../alphabet";
 import { assertRankLength, assertString, genBetween } from "../algorithm/between";
 import { evenlySpaced } from "../evenly-spaced";
+import {
+  analyze as analyzeRanks,
+  move as moveRank,
+  rankAfter as rankAfterHelper,
+  rankBefore as rankBeforeHelper,
+  rankBetween as rankBetweenHelper,
+  safeParse,
+  type AnalyzeOptions,
+  type RankAnalysis
+} from "../helpers";
 import { maybeFireRebalanceMonitor, type RebalanceMonitor } from "../rebalance-monitor";
 
 /**
@@ -140,5 +150,132 @@ export class LexoRank {
   /** Produce a rank strictly between this and `other`. */
   between(other: LexoRank): LexoRank {
     return LexoRank.between(this, other);
+  }
+
+  /**
+   * Rank for the "insert after `prev`" case — falls back to `middle` when
+   * `prev` is omitted (empty-list insert). `alphabet` and `monitor` are only
+   * consulted for the fallback; otherwise the derived rank inherits from
+   * `prev`.
+   */
+  static rankAfter(
+    prev?: LexoRank,
+    alphabet: Alphabet = BASE36,
+    monitor?: RebalanceMonitor<LexoRank>
+  ): LexoRank {
+    return rankAfterHelper(prev, () => LexoRank.middle(alphabet, monitor));
+  }
+
+  /** Symmetric to `rankAfter`. */
+  static rankBefore(
+    next?: LexoRank,
+    alphabet: Alphabet = BASE36,
+    monitor?: RebalanceMonitor<LexoRank>
+  ): LexoRank {
+    return rankBeforeHelper(next, () => LexoRank.middle(alphabet, monitor));
+  }
+
+  /**
+   * Combined variant — either, both, or neither of `a`/`b` may be absent.
+   * One call covers every drag-and-drop boundary.
+   */
+  static rankBetween(
+    a?: LexoRank,
+    b?: LexoRank,
+    alphabet: Alphabet = BASE36,
+    monitor?: RebalanceMonitor<LexoRank>
+  ): LexoRank {
+    return rankBetweenHelper(a, b, () => LexoRank.middle(alphabet, monitor));
+  }
+
+  /**
+   * Sort comparator: `arr.sort(LexoRank.compare)` works unbound because this
+   * doesn't use `this`.
+   */
+  static compare(this: void, a: LexoRank, b: LexoRank): number {
+    return a.compareTo(b);
+  }
+
+  /** Non-throwing parse. `true` iff `raw` is a valid rank under `alphabet`. */
+  static isValid(raw: unknown, alphabet: Alphabet = BASE36): boolean {
+    if (typeof raw !== "string") return false;
+    return safeParse(() => new LexoRank(raw, alphabet)) !== undefined;
+  }
+
+  /**
+   * Compute the new rank for moving `list[from]` to position `to` in the
+   * post-move list. Returns the original rank when `from === to`.
+   */
+  static move(
+    list: readonly LexoRank[],
+    from: number,
+    to: number,
+    alphabet: Alphabet = BASE36,
+    monitor?: RebalanceMonitor<LexoRank>
+  ): LexoRank {
+    return moveRank(list, from, to, () => LexoRank.middle(alphabet, monitor));
+  }
+
+  /** Length-distribution summary — see `RankAnalysis`. */
+  static analyze(
+    ranks: readonly LexoRank[],
+    options?: AnalyzeOptions
+  ): RankAnalysis {
+    return analyzeRanks(ranks, options);
+  }
+
+  /**
+   * Non-throwing `parse`. Returns the rank on success, `undefined` on any
+   * failure (invalid character, wrong length, non-string input, …).
+   */
+  static safeParse(
+    raw: unknown,
+    alphabet: Alphabet = BASE36,
+    monitor?: RebalanceMonitor<LexoRank>
+  ): LexoRank | undefined {
+    if (typeof raw !== "string") return undefined;
+    return safeParse(() => new LexoRank(raw, alphabet, monitor));
+  }
+
+  /** Non-throwing `rankAfter`. Returns `undefined` when `prev` is at the absolute max. */
+  static safeRankAfter(
+    prev?: LexoRank,
+    alphabet: Alphabet = BASE36,
+    monitor?: RebalanceMonitor<LexoRank>
+  ): LexoRank | undefined {
+    return safeParse(() => LexoRank.rankAfter(prev, alphabet, monitor));
+  }
+
+  /** Non-throwing `rankBefore`. Returns `undefined` when `next` is at the absolute min. */
+  static safeRankBefore(
+    next?: LexoRank,
+    alphabet: Alphabet = BASE36,
+    monitor?: RebalanceMonitor<LexoRank>
+  ): LexoRank | undefined {
+    return safeParse(() => LexoRank.rankBefore(next, alphabet, monitor));
+  }
+
+  /**
+   * Non-throwing `rankBetween`. Returns `undefined` for degenerate inputs
+   * (equal bounds, adjacent-in-min-char neighbours, mismatched alphabets).
+   */
+  static safeRankBetween(
+    a?: LexoRank,
+    b?: LexoRank,
+    alphabet: Alphabet = BASE36,
+    monitor?: RebalanceMonitor<LexoRank>
+  ): LexoRank | undefined {
+    return safeParse(() => LexoRank.rankBetween(a, b, alphabet, monitor));
+  }
+
+  /** Non-throwing `move`. Returns `undefined` on out-of-range / empty-list inputs. */
+  static safeMove(
+    list: readonly LexoRank[],
+    from: number,
+    to: number,
+    alphabet: Alphabet = BASE36,
+    monitor?: RebalanceMonitor<LexoRank>
+  ): LexoRank | undefined {
+    return safeParse(() => LexoRank.move(list, from, to, alphabet, monitor));
   }
 }

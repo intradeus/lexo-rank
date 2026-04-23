@@ -18,7 +18,8 @@ interface RankLike<Self> {
 interface RankModule<T> {
   min(): T;
   max(): T;
-  between(a: T, b: T): T;
+  // Matches the factory module's signature — both args optional.
+  rankBetween(a?: T, b?: T): T;
 }
 
 function runStress<T extends RankLike<T>>(
@@ -46,7 +47,7 @@ function runStress<T extends RankLike<T>>(
     const a = nonTail[pick]!;
     const c = next[a]!;
     const newId = i + 2;
-    const v = R.between(values[a]!, values[c]!);
+    const v = R.rankBetween(values[a]!, values[c]!);
     values[newId] = v;
     next[newId] = c;
     next[a] = newId;

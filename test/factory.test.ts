@@ -29,7 +29,7 @@ describe("createLexoRank — simple mode", () => {
   it("infers an alphabet from sample ranks", () => {
     const R = createLexoRank({ samples: ["abc", "xyz", "mno"] });
     expect(R.alphabet.chars).toBe("abcmnoxyz");
-    const m = R.between(R.from("a"), R.from("z"));
+    const m = R.rankBetween(R.from("a"), R.from("z"));
     expect(m.value > "a" && m.value < "z").toBe(true);
   });
 
@@ -63,7 +63,7 @@ describe("createLexoRank — bucket mode", () => {
     const R = createLexoRank({ bucket: true });
     const a = R.min();
     const b = R.max();
-    const mid = R.between(a, b);
+    const mid = R.rankBetween(a, b);
     expect(a.compareTo(mid)).toBe(-1);
     expect(mid.compareTo(b)).toBe(-1);
   });
@@ -86,7 +86,7 @@ describe("createLexoRank — every mode exercises min/max/middle/between/parse/f
       const hi = mod.max();
       const mid = mod.middle();
       // Cast around per-mode generic narrowing; runtime types line up.
-      const between = mod.between(lo as never, hi as never);
+      const between = mod.rankBetween(lo as never, hi as never);
       const parsed = mod.parse(mid.toString());
       const from = mod.from(mid.toString());
 

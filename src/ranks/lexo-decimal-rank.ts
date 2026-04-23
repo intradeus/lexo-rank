@@ -2,6 +2,16 @@ import { BASE36, type Alphabet } from "../alphabet";
 import { assertRankLength, assertString } from "../algorithm/between";
 import { decimalBetween, decimalLess } from "../algorithm/decimal-between";
 import { evenlySpaced } from "../evenly-spaced";
+import {
+  analyze as analyzeRanks,
+  move as moveRank,
+  rankAfter as rankAfterHelper,
+  rankBefore as rankBeforeHelper,
+  rankBetween as rankBetweenHelper,
+  safeParse,
+  type AnalyzeOptions,
+  type RankAnalysis
+} from "../helpers";
 import { maybeFireRebalanceMonitor, type RebalanceMonitor } from "../rebalance-monitor";
 
 export const DEFAULT_DECIMAL_SEPARATOR = ":";
@@ -42,6 +52,7 @@ export class LexoDecimalRank {
   readonly decimalSeparator: string;
   readonly integerWidth: number;
   readonly rebalanceThreshold: number | undefined;
+  readonly rebalanceAvgThreshold: number | undefined;
   readonly onRebalanceNeeded: ((rank: LexoDecimalRank) => void) | undefined;
 
   constructor(integer: string, decimal: string, config: LexoDecimalRankConfig = {}) {
@@ -70,6 +81,7 @@ export class LexoDecimalRank {
     this.decimalSeparator = decimalSeparator;
     this.integerWidth = integerWidth;
     this.rebalanceThreshold = config.rebalanceThreshold;
+    this.rebalanceAvgThreshold = config.rebalanceAvgThreshold;
     this.onRebalanceNeeded = config.onRebalanceNeeded;
   }
 
@@ -205,6 +217,104 @@ export class LexoDecimalRank {
     return LexoDecimalRank.between(this, other);
   }
 
+  /** Drag-and-drop helper; falls back to `middle(config)` when `prev` is omitted. */
+  static rankAfter(
+    prev?: LexoDecimalRank,
+    config: LexoDecimalRankConfig = {}
+  ): LexoDecimalRank {
+    return rankAfterHelper(prev, () => LexoDecimalRank.middle(config));
+  }
+
+  /** Symmetric to `rankAfter`. */
+  static rankBefore(
+    next?: LexoDecimalRank,
+    config: LexoDecimalRankConfig = {}
+  ): LexoDecimalRank {
+    return rankBeforeHelper(next, () => LexoDecimalRank.middle(config));
+  }
+
+  /** Combined variant — covers every insertion boundary. */
+  static rankBetween(
+    a?: LexoDecimalRank,
+    b?: LexoDecimalRank,
+    config: LexoDecimalRankConfig = {}
+  ): LexoDecimalRank {
+    return rankBetweenHelper(a, b, () => LexoDecimalRank.middle(config));
+  }
+
+  /** Sort comparator, usable unbound with `Array#sort`. */
+  static compare(this: void, a: LexoDecimalRank, b: LexoDecimalRank): number {
+    return a.compareTo(b);
+  }
+
+  /** Non-throwing parse under the given config. */
+  static isValid(raw: unknown, config: LexoDecimalRankConfig = {}): boolean {
+    if (typeof raw !== "string") return false;
+    return safeParse(() => LexoDecimalRank.parse(raw, config)) !== undefined;
+  }
+
+  /** See `LexoRank.move`. */
+  static move(
+    list: readonly LexoDecimalRank[],
+    from: number,
+    to: number,
+    config: LexoDecimalRankConfig = {}
+  ): LexoDecimalRank {
+    return moveRank(list, from, to, () => LexoDecimalRank.middle(config));
+  }
+
+  /** See `RankAnalysis`. */
+  static analyze(
+    ranks: readonly LexoDecimalRank[],
+    options?: AnalyzeOptions
+  ): RankAnalysis {
+    return analyzeRanks(ranks, options);
+  }
+
+  /** Non-throwing `parse`. See `LexoRank.safeParse`. */
+  static safeParse(
+    raw: unknown,
+    config: LexoDecimalRankConfig = {}
+  ): LexoDecimalRank | undefined {
+    if (typeof raw !== "string") return undefined;
+    return safeParse(() => LexoDecimalRank.parse(raw, config));
+  }
+
+  /** Non-throwing `rankAfter`. */
+  static safeRankAfter(
+    prev?: LexoDecimalRank,
+    config: LexoDecimalRankConfig = {}
+  ): LexoDecimalRank | undefined {
+    return safeParse(() => LexoDecimalRank.rankAfter(prev, config));
+  }
+
+  /** Non-throwing `rankBefore`. */
+  static safeRankBefore(
+    next?: LexoDecimalRank,
+    config: LexoDecimalRankConfig = {}
+  ): LexoDecimalRank | undefined {
+    return safeParse(() => LexoDecimalRank.rankBefore(next, config));
+  }
+
+  /** Non-throwing `rankBetween`. */
+  static safeRankBetween(
+    a?: LexoDecimalRank,
+    b?: LexoDecimalRank,
+    config: LexoDecimalRankConfig = {}
+  ): LexoDecimalRank | undefined {
+    return safeParse(() => LexoDecimalRank.rankBetween(a, b, config));
+  }
+
+  /** Non-throwing `move`. */
+  static safeMove(
+    list: readonly LexoDecimalRank[],
+    from: number,
+    to: number,
+    config: LexoDecimalRankConfig = {}
+  ): LexoDecimalRank | undefined {
+    return safeParse(() => LexoDecimalRank.move(list, from, to, config));
+  }
+
   #config(): LexoDecimalRankConfig {
     return {
       alphabet: this.alphabet,
@@ -212,6 +322,9 @@ export class LexoDecimalRank {
       integerWidth: this.integerWidth,
       ...(this.rebalanceThreshold !== undefined
         ? { rebalanceThreshold: this.rebalanceThreshold }
+        : {}),
+      ...(this.rebalanceAvgThreshold !== undefined
+        ? { rebalanceAvgThreshold: this.rebalanceAvgThreshold }
         : {}),
       ...(this.onRebalanceNeeded !== undefined
         ? { onRebalanceNeeded: this.onRebalanceNeeded }

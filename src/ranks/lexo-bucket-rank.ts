@@ -1,6 +1,18 @@
 import { BASE36, type Alphabet } from "../alphabet";
 import { assertRankLength, assertString, genBetween } from "../algorithm/between";
 import { evenlySpaced } from "../evenly-spaced";
+import {
+  analyze as analyzeRanks,
+  move as moveRank,
+  nextBucketInRing,
+  rankAfter as rankAfterHelper,
+  rankBefore as rankBeforeHelper,
+  rankBetween as rankBetweenHelper,
+  safeParse,
+  type AnalyzeOptions,
+  type RankAnalysis,
+  type RebalancePlan
+} from "../helpers";
 import { maybeFireRebalanceMonitor, type RebalanceMonitor } from "../rebalance-monitor";
 
 export const DEFAULT_BUCKETS = Object.freeze(["0", "1", "2"] as const);
@@ -32,6 +44,7 @@ export class LexoBucketRank {
   readonly buckets: readonly string[];
   readonly bucketSeparator: string;
   readonly rebalanceThreshold: number | undefined;
+  readonly rebalanceAvgThreshold: number | undefined;
   readonly onRebalanceNeeded: ((rank: LexoBucketRank) => void) | undefined;
 
   constructor(bucket: string, value: string, config: LexoBucketRankConfig = {}) {
@@ -58,6 +71,7 @@ export class LexoBucketRank {
     this.buckets = buckets;
     this.bucketSeparator = bucketSeparator;
     this.rebalanceThreshold = config.rebalanceThreshold;
+    this.rebalanceAvgThreshold = config.rebalanceAvgThreshold;
     this.onRebalanceNeeded = config.onRebalanceNeeded;
   }
 
@@ -203,6 +217,135 @@ export class LexoBucketRank {
     return LexoBucketRank.between(this, other);
   }
 
+  /**
+   * Drag-and-drop helper: "put something after `prev`". Falls back to
+   * `middle(config)` when `prev` is omitted.
+   */
+  static rankAfter(
+    prev?: LexoBucketRank,
+    config: LexoBucketRankConfig = {}
+  ): LexoBucketRank {
+    return rankAfterHelper(prev, () => LexoBucketRank.middle(config));
+  }
+
+  /** Symmetric to `rankAfter`. */
+  static rankBefore(
+    next?: LexoBucketRank,
+    config: LexoBucketRankConfig = {}
+  ): LexoBucketRank {
+    return rankBeforeHelper(next, () => LexoBucketRank.middle(config));
+  }
+
+  /** Combined variant — covers every insertion boundary. */
+  static rankBetween(
+    a?: LexoBucketRank,
+    b?: LexoBucketRank,
+    config: LexoBucketRankConfig = {}
+  ): LexoBucketRank {
+    return rankBetweenHelper(a, b, () => LexoBucketRank.middle(config));
+  }
+
+  /** Sort comparator, usable unbound with `Array#sort`. */
+  static compare(this: void, a: LexoBucketRank, b: LexoBucketRank): number {
+    return a.compareTo(b);
+  }
+
+  /** Non-throwing parse under the given config. */
+  static isValid(raw: unknown, config: LexoBucketRankConfig = {}): boolean {
+    if (typeof raw !== "string") return false;
+    return safeParse(() => LexoBucketRank.parse(raw, config)) !== undefined;
+  }
+
+  /** See `LexoRank.move`. */
+  static move(
+    list: readonly LexoBucketRank[],
+    from: number,
+    to: number,
+    config: LexoBucketRankConfig = {}
+  ): LexoBucketRank {
+    return moveRank(list, from, to, () => LexoBucketRank.middle(config));
+  }
+
+  /** See `RankAnalysis`. */
+  static analyze(
+    ranks: readonly LexoBucketRank[],
+    options?: AnalyzeOptions
+  ): RankAnalysis {
+    return analyzeRanks(ranks, options);
+  }
+
+  /** Non-throwing `parse`. See `LexoRank.safeParse`. */
+  static safeParse(
+    raw: unknown,
+    config: LexoBucketRankConfig = {}
+  ): LexoBucketRank | undefined {
+    if (typeof raw !== "string") return undefined;
+    return safeParse(() => LexoBucketRank.parse(raw, config));
+  }
+
+  /** Non-throwing `rankAfter`. */
+  static safeRankAfter(
+    prev?: LexoBucketRank,
+    config: LexoBucketRankConfig = {}
+  ): LexoBucketRank | undefined {
+    return safeParse(() => LexoBucketRank.rankAfter(prev, config));
+  }
+
+  /** Non-throwing `rankBefore`. */
+  static safeRankBefore(
+    next?: LexoBucketRank,
+    config: LexoBucketRankConfig = {}
+  ): LexoBucketRank | undefined {
+    return safeParse(() => LexoBucketRank.rankBefore(next, config));
+  }
+
+  /** Non-throwing `rankBetween`. */
+  static safeRankBetween(
+    a?: LexoBucketRank,
+    b?: LexoBucketRank,
+    config: LexoBucketRankConfig = {}
+  ): LexoBucketRank | undefined {
+    return safeParse(() => LexoBucketRank.rankBetween(a, b, config));
+  }
+
+  /** Non-throwing `move`. */
+  static safeMove(
+    list: readonly LexoBucketRank[],
+    from: number,
+    to: number,
+    config: LexoBucketRankConfig = {}
+  ): LexoBucketRank | undefined {
+    return safeParse(() => LexoBucketRank.move(list, from, to, config));
+  }
+
+  /**
+   * Plan the next rebalance step. Given `currentBucket` (defaults to the
+   * first bucket, or `config.activeBucket` if supplied), returns the target
+   * bucket in the ring, a `isWrap` flag for migration-direction logic, and
+   * a `ranks(count)` factory that generates evenly-spaced fresh ranks in
+   * the target bucket.
+   *
+   * This collapses the three-step README recipe (pick next bucket, detect
+   * wrap, generate ranks) into one call and centralises the direction rule
+   * that migrations most often get wrong.
+   */
+  static planRebalance(
+    currentBucket?: string,
+    config: LexoBucketRankConfig = {}
+  ): RebalancePlan<LexoBucketRank> {
+    const buckets = config.buckets ?? DEFAULT_BUCKETS;
+    validateBuckets(buckets);
+    const current = currentBucket ?? config.activeBucket ?? buckets[0]!;
+    const { target, isWrap } = nextBucketInRing(buckets, current);
+    return {
+      currentBucket: current,
+      targetBucket: target,
+      isWrap,
+      ranks: (count: number) =>
+        LexoBucketRank.evenlySpacedInBucket(target, count, config)
+    };
+  }
+
   #config(): LexoBucketRankConfig {
     return {
       alphabet: this.alphabet,
@@ -213,6 +356,9 @@ export class LexoBucketRank {
       activeBucket: this.bucket,
       ...(this.rebalanceThreshold !== undefined
         ? { rebalanceThreshold: this.rebalanceThreshold }
+        : {}),
+      ...(this.rebalanceAvgThreshold !== undefined
+        ? { rebalanceAvgThreshold: this.rebalanceAvgThreshold }
         : {}),
       ...(this.onRebalanceNeeded !== undefined
         ? { onRebalanceNeeded: this.onRebalanceNeeded }

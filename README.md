@@ -52,8 +52,8 @@ const between = LexoRank.between(first, middle);
 middle.genNext(); // a rank greater than 'i'
 middle.genPrev(); // a rank less than 'i'
 
-// Sort
-[last, first, middle].sort((a, b) => a.compareTo(b));
+// Sort (LexoRank.compare is unbound-safe — pass it as-is)
+[last, first, middle].sort(LexoRank.compare);
 ```
 
 ## Each mode in detail
@@ -163,8 +163,9 @@ const R = createLexoRank({
 | `bucketSeparator`    | `string`            | `"\|"`          | Single character, not in alphabet, not in any bucket.             |
 | `decimalSeparator`   | `string`            | `":"`           | Single character, not in alphabet.                                |
 | `integerWidth`       | `number`            | `6`             | Positive integer ≤ `MAX_INTEGER_WIDTH` (256). Decimal-mode only.  |
-| `rebalanceThreshold` | `number`            | —               | Fire `onRebalanceNeeded` when a derived rank exceeds this length. |
-| `onRebalanceNeeded`  | `(rank) => void`    | —               | Sync callback for the above. See the Monitoring section.          |
+| `rebalanceThreshold` | `number`            | —               | Fire `onRebalanceNeeded` when a derived rank exceeds this length. Also overrides the default `maxThreshold` (30) used by `analyze`. |
+| `rebalanceAvgThreshold` | `number`         | —               | Override the default `avgThreshold` (15) used by `analyze`'s `recommendRebalance`. Not consulted by the monitor callback. |
+| `onRebalanceNeeded`  | `(rank) => void`    | —               | Sync callback fired when a derived rank exceeds the threshold. Setting this turns monitoring on; omit to disable. See the [Monitoring section](#monitoring-rebalance-need). |
 
 ## API (common shape)
 
@@ -183,7 +184,124 @@ Every rank class exposes:
 | `rank.equals(other)`           | Structural equality (all config fields).             |
 | `rank.toString()`              | The rendered rank string.                            |
 
-Bucket variants add `inBucket(name)` / `getBucket()`, plus `evenlySpacedInBucket(name, count)` on the static and factory-module surface.
+Bucket variants add `inBucket(name)` / `getBucket()`, plus `evenlySpacedInBucket(name, count)` and `planRebalance(current?)` on the static and factory-module surface.
+
+Every class also exposes a static `compare(a, b)` — see [Ergonomic helpers](#ergonomic-helpers).
+
+## Ergonomic helpers
+
+Every rank class and the factory module expose a common set of helpers on top of the minimal core. Use these to avoid re-implementing the patterns that trip most teams up the first time they wire lexorank into a UI.
+
+| Helper                       | What it does                                                                                     |
+| ---------------------------- | ------------------------------------------------------------------------------------------------ |
+| `R.rankAfter(prev?)`         | Rank > `prev`. If `prev` is omitted (empty list), returns `middle()`.                            |
+| `R.rankBefore(next?)`        | Rank < `next`. If `next` is omitted, returns `middle()`.                                         |
+| `R.rankBetween(a?, b?)`      | Combined variant — either, both, or neither of `a`/`b` may be absent. One call per drop target.  |
+| `R.compare`                  | Sort comparator. `arr.sort(R.compare)` works unbound.                                            |
+| `R.move(list, from, to)`     | New rank for moving `list[from]` to position `to`. Returns `list[from]` unchanged when equal.    |
+| `R.isValid(raw)`             | Non-throwing parse. `true` iff `raw` parses without throwing.                                   |
+| `R.analyze(ranks)`           | Length-distribution summary: `{ count, max, avg, p95, recommendRebalance }`.                     |
+| `R.planRebalance(current?)`  | **Bucket variants only.** Plans the next migration step in the ring — see [Rebalancing](#rebalancing). |
+
+### Drag-and-drop in one call
+
+`rankBetween(a?, b?)` handles all four insertion boundaries, so the UI layer stays terse:
+
+```ts
+const R = createLexoRank();
+
+// Inserting into an empty list
+R.rankBetween();                      // → middle
+
+// Inserting at the head
+R.rankBetween(undefined, list[0]);    // → less than list[0]
+
+// Inserting at the tail
+R.rankBetween(list[list.length - 1]); // → greater than the last
+
+// Inserting between two rows
+R.rankBetween(list[i], list[i + 1]);
+```
+
+For a move operation, `R.move` collapses the "remove + re-insert" bookkeeping:
+
+```ts
+// Drag row 2 to visual position 5
+const newRank = R.move(rankedRows, 2, 5);
+await db.update(rankedRows[2].id, { rank: newRank.toString() });
+```
+
+### Density introspection
+
+`analyze` reports the rendered-length distribution of a rank list — pair it with the monitoring callback (or run it periodically) to decide when to rebalance:
+
+```ts
+const { max, avg, p95, recommendRebalance } = R.analyze(rows.map((r) => R.parse(r.rank)));
+if (recommendRebalance) enqueueRebalance();
+```
+
+`recommendRebalance` defaults to `max > 30` or `avg > 15` (the rules of thumb from the [Rebalancing](#rebalancing) section). Override per-call or via config:
+
+```ts
+// Per call
+R.analyze(ranks, { maxThreshold: 40, avgThreshold: 20 });
+
+// Or bake the thresholds into the module — `rebalanceThreshold` does double
+// duty as the per-rank monitor threshold and the analyze default.
+const R = createLexoRank({
+  rebalanceThreshold: 40,
+  rebalanceAvgThreshold: 20
+});
+R.analyze(ranks); // uses 40 / 20 without any per-call args
+```
+
+Or ignore the recommendation entirely and read the raw `max` / `avg` / `p95` stats if your app wants a different policy.
+
+### `isValid` for data-import and form paths
+
+```ts
+const R = createLexoRank({ decimal: true });
+R.isValid("i00000:");  // true
+R.isValid("i:");       // true — short integer parts get right-padded
+R.isValid("i00000");   // false — missing decimal separator
+R.isValid("");         // false
+```
+
+Same semantics as `R.parse(raw)` throwing, just without the try/catch.
+Note it's a parse check, not a string-equality check — e.g. `"i:"` is valid
+because it parses, but it renders back as `"i00000:"` under the default
+`integerWidth` of 6.
+
+### `safe*` variants — return `undefined` instead of throwing
+
+Every throw-on-failure helper has a `safe*` counterpart for callers who want
+to handle bad input without wrapping each call in a try/catch. They return
+`T | undefined` — the rank on success, `undefined` on any failure (invalid
+input, equal bounds, absolute-boundary hit, bucket mismatch, etc.).
+
+| Strict (throws)         | Safe (`T \| undefined`) |
+| ----------------------- | ----------------------- |
+| `R.parse(raw)`          | `R.safeParse(raw)`      |
+| `R.rankAfter(prev?)`    | `R.safeRankAfter(prev?)` |
+| `R.rankBefore(next?)`   | `R.safeRankBefore(next?)` |
+| `R.rankBetween(a?, b?)` | `R.safeRankBetween(a?, b?)` |
+| `R.move(list, from, to)`| `R.safeMove(list, from, to)` |
+
+```ts
+const R = createLexoRank();
+
+// Drag-and-drop: fall back to a rebalance if the bracket is degenerate.
+const newRank = R.safeRankBetween(prev, next) ?? triggerRebalance();
+
+// Data import: skip malformed rows instead of aborting.
+const parsed = rows
+  .map((row) => R.safeParse(row.rank))
+  .filter((r): r is NonNullable<typeof r> => r !== undefined);
+```
+
+`isValid(raw)` and `safeParse(raw)` are complements — use `isValid` when you
+only need the boolean, `safeParse` when you want the parsed value or
+`undefined` in one call.
 
 ## Monitoring rebalance need
 
@@ -204,8 +322,9 @@ const R = createLexoRank({
 
 **Contract:**
 
-- Monitoring is only active when **both** `rebalanceThreshold` and
-  `onRebalanceNeeded` are set. Omit either to disable.
+- Monitoring is active whenever `onRebalanceNeeded` is set. `rebalanceThreshold`
+  is optional — omit it to use the library default (30). To disable monitoring,
+  leave `onRebalanceNeeded` unset.
 - The callback fires **only on ranks that were derived** from existing ones
   — specifically `between` (static and instance), `genNext`, and `genPrev`.
 - **Does NOT fire** on: direct constructors, `parse`, `min`, `max`, `middle`,
@@ -233,10 +352,25 @@ const R = createLexoRank({
 
 ## Low-level primitives
 
+These are the raw building blocks most users won't touch directly — they
+power the class/module APIs documented above. Reach for them if you're
+avoiding class allocation in a hot path or composing your own helpers.
+
 ```ts
-import { genBetween, rankBetween, evenlySpaced, MAX_RANK_LENGTH } from "lexo-rank";
+import {
+  genBetween,
+  rankBetween,
+  evenlySpaced,
+  analyze,
+  nextBucketInRing,
+  safeParse,
+  MAX_RANK_LENGTH
+} from "lexo-rank";
 
 // genBetween is the core algorithm; rankBetween defaults to BASE36.
+// Both operate on raw strings — no rank-class instances involved.
+// NOT the same as `R.rankBetween(a?, b?)` on the factory module, which takes
+// rank instances and handles optional boundaries (see Ergonomic helpers).
 genBetween("a", "z", BASE36);
 rankBetween("a", "z");
 
@@ -244,6 +378,17 @@ rankBetween("a", "z");
 // using a recursive binary-split so lengths stay logarithmic in N.
 // Works with any rank class that has a `.between(other)` method.
 const fresh = evenlySpaced(LexoRank.min(), LexoRank.max(), 100);
+
+// analyze: length-distribution summary. Works on anything with a toString().
+analyze(fresh); // { count, max, avg, p95, recommendRebalance }
+
+// nextBucketInRing: the ring-rotation primitive powering planRebalance.
+nextBucketInRing(["0", "1", "2"], "2"); // { target: "0", isWrap: true }
+
+// safeParse: generic `() => T` wrapper that returns `T | undefined`.
+// NOT the same as `R.safeParse(raw)` on the factory module / class statics
+// — that one takes a raw rank string; this one takes any throwing thunk.
+safeParse(() => LexoRank.parse(maybeRank));
 
 // More ergonomic wrappers live on each class + the factory module:
 LexoRank.evenlySpaced(100); // defaults to min/max
@@ -296,33 +441,39 @@ Pick the direction wrong and readers see reshuffled lists until the migration co
 
 ### Recipe
 
+Use `planRebalance` to collapse the direction-detection logic — the piece
+teams most often get wrong — into a single call:
+
 ```ts
-// 1. Figure out the current and next buckets.
+const R = createLexoRank({ bucket: true });
+
+// 1. Figure out the current and next buckets, plus the migration direction.
 const currentBucket = await config.get("lexorank.activeBucket"); // e.g. "0"
-const targetBucket = nextBucketAfter(currentBucket);              // e.g. "1"
-const isWrap = targetBucket < currentBucket; // true only on 2 → 0
+const plan = R.planRebalance(currentBucket);
+// plan.currentBucket === "0"
+// plan.targetBucket  === "1"
+// plan.isWrap        === false  (would be true only on 2 → 0)
 
 // 2. Read every row in the current bucket, ordered by rank.
 const rows = await db.query(
-  `SELECT id, rank FROM items WHERE rank LIKE '${currentBucket}|%' ORDER BY rank ASC`
+  `SELECT id, rank FROM items WHERE rank LIKE '${plan.currentBucket}|%' ORDER BY rank ASC`
 );
 
 // 3. Generate fresh, evenly-spaced ranks in the target bucket.
 //    The library runs a recursive binary split so lengths stay logarithmic in N.
-const R = createLexoRank({ bucket: true, activeBucket: currentBucket });
-const fresh = R.evenlySpacedInBucket(targetBucket, rows.length);
+const fresh = plan.ranks(rows.length);
 
 // 4. Write back in the correct direction.
 //    Forward migrations (0→1, 1→2): highest rank first.
 //    Wrap migration (2→0): lowest rank first.
-const writeOrder = isWrap ? rows : [...rows].reverse();
-const rankOrder  = isWrap ? fresh : [...fresh].reverse();
+const writeOrder = plan.isWrap ? rows : [...rows].reverse();
+const rankOrder  = plan.isWrap ? fresh : [...fresh].reverse();
 for (let i = 0; i < writeOrder.length; i++) {
   await db.update(writeOrder[i].id, { rank: rankOrder[i].toString() });
 }
 
 // 5. Flip the live-bucket pointer so new inserts land in the target bucket.
-await config.set("lexorank.activeBucket", targetBucket);
+await config.set("lexorank.activeBucket", plan.targetBucket);
 ```
 
 Two caveats the snippet glosses over:
@@ -337,7 +488,7 @@ There's no string strictly between `"a"` and `"a0"`: any rank starting with `"a"
 This only comes up when a rank with a trailing min character (like `"a0"`) is stored — which the library never generates on its own (results are always trimmed of trailing min chars). If you hit it:
 
 1. **Widen the bracket.** Instead of `between(prev, next)`, compute `between(prevOfPrev, next)` or `between(prev, nextOfNext)` — pick a slightly larger gap that does have room.
-2. **Regenerate the offending neighbour** with `genNext(prev)` or `genPrev(next)`. Neither will end in a min character.
+2. **Regenerate the offending neighbour** with `prev.genNext()` or `next.genPrev()`. Neither will end in a min character.
 3. **Rebalance.** Move the affected rows into the next bucket and regenerate their ranks from scratch.
 
 ## Examples generated by the lib

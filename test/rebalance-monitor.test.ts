@@ -206,7 +206,7 @@ describe("RebalanceMonitor — createLexoRank factory", () => {
   it("threads the monitor through simple mode", () => {
     const onRebalanceNeeded = vi.fn();
     const R = createLexoRank({ rebalanceThreshold: 0, onRebalanceNeeded });
-    R.between(R.min(), R.max());
+    R.rankBetween(R.min(), R.max());
     expect(onRebalanceNeeded).toHaveBeenCalledTimes(1);
   });
 
@@ -217,7 +217,7 @@ describe("RebalanceMonitor — createLexoRank factory", () => {
       rebalanceThreshold: 0,
       onRebalanceNeeded
     });
-    R.between(R.min(), R.max());
+    R.rankBetween(R.min(), R.max());
     expect(onRebalanceNeeded).toHaveBeenCalledTimes(1);
   });
 
@@ -228,7 +228,7 @@ describe("RebalanceMonitor — createLexoRank factory", () => {
       rebalanceThreshold: 0,
       onRebalanceNeeded
     });
-    R.between(R.min(), R.max());
+    R.rankBetween(R.min(), R.max());
     expect(onRebalanceNeeded).toHaveBeenCalledTimes(1);
   });
 
@@ -240,7 +240,7 @@ describe("RebalanceMonitor — createLexoRank factory", () => {
       rebalanceThreshold: 0,
       onRebalanceNeeded
     });
-    R.between(R.min(), R.max());
+    R.rankBetween(R.min(), R.max());
     expect(onRebalanceNeeded).toHaveBeenCalledTimes(1);
   });
 
@@ -261,6 +261,50 @@ describe("RebalanceMonitor — createLexoRank factory", () => {
   it("omitting only the callback disables monitoring", () => {
     // Should not throw, and the threshold alone has no observable effect.
     const R = createLexoRank({ rebalanceThreshold: 0 });
-    expect(() => R.between(R.min(), R.max())).not.toThrow();
+    expect(() => R.rankBetween(R.min(), R.max())).not.toThrow();
+  });
+
+  it("rebalanceAvgThreshold is preserved across derivations", () => {
+    // Regression: #config() on the decimal/bucket classes used to rebuild
+    // the monitor block from individual fields and drop rebalanceAvgThreshold.
+    const bucket = new LexoBucketRank("0", "a", {
+      rebalanceAvgThreshold: 20,
+      onRebalanceNeeded: () => void 0
+    });
+    expect(bucket.rebalanceAvgThreshold).toBe(20);
+    expect(bucket.between(new LexoBucketRank("0", "z")).rebalanceAvgThreshold).toBe(20);
+    expect(bucket.inBucket("1").rebalanceAvgThreshold).toBe(20);
+
+    const decimal = new LexoDecimalRank("a", "", { rebalanceAvgThreshold: 22 });
+    expect(decimal.rebalanceAvgThreshold).toBe(22);
+    expect(decimal.between(new LexoDecimalRank("z", "")).rebalanceAvgThreshold).toBe(22);
+
+    const bucketDecimal = new LexoBucketDecimalRank("0", "a", "", {
+      rebalanceAvgThreshold: 25
+    });
+    expect(bucketDecimal.rebalanceAvgThreshold).toBe(25);
+    expect(
+      bucketDecimal.between(new LexoBucketDecimalRank("0", "z", "")).rebalanceAvgThreshold
+    ).toBe(25);
+    expect(bucketDecimal.inBucket("1").rebalanceAvgThreshold).toBe(25);
+  });
+
+  it("callback alone is enough — threshold defaults to the library default (30)", () => {
+    // With no rebalanceThreshold, the 30-char default kicks in. Short
+    // base36 ranks stay well under 30, so the callback should not fire
+    // for ordinary between() / genNext() calls.
+    const onRebalanceNeeded = vi.fn();
+    const R = createLexoRank({ onRebalanceNeeded });
+    for (let i = 0; i < 10; i++) R.rankBetween(R.min(), R.max());
+    expect(onRebalanceNeeded).not.toHaveBeenCalled();
+
+    // Two ranks adjacent at 31 chars — between(a, b) must produce a rank
+    // at least 31 long (it can't trim down to a shorter midpoint), so the
+    // default 30-char threshold trips and the callback fires. This proves
+    // monitoring is active without an explicit rebalanceThreshold.
+    const a = R.parse("a" + "0".repeat(29) + "1"); // length 31
+    const b = R.parse("a" + "0".repeat(29) + "2");
+    R.rankBetween(a, b);
+    expect(onRebalanceNeeded).toHaveBeenCalled();
   });
 });
