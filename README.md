@@ -4,7 +4,7 @@
 [![codecov](https://codecov.io/github/intradeus/lexo-rank/graph/badge.svg?token=5244N626I6)](https://codecov.io/github/intradeus/lexo-rank)
 [![npm version](https://img.shields.io/npm/v/@intradeus/lexo-rank.svg)](https://www.npmjs.com/package/@intradeus/lexo-rank)
 
-A flexible LexoRank implementation in TypeScript. Generate string ranks that sort lexicographically and can be inserted between any two existing ranks without reindexing the rest of the list. Comes with helpers and a rebalance monitor, to help decide when a rebalance is required and how to execute it.
+A flexible LexoRank implementation in TypeScript. Generate string ranks that sort lexicographically and can be inserted between any two existing ranks without reindexing the rest of the list. Complex implementations available (with Buckets and Decimals). Comes with helpers and a rebalance monitor, to help decide when a rebalance is required and how to execute it.
 
 Zero runtime dependencies. Ships ESM + CJS + `.d.ts`.
 
